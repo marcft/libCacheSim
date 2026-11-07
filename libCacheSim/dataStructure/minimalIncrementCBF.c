@@ -68,6 +68,7 @@ int minimalIncrementCBF_init(struct minimalIncrementCBF *CBF, int entries,
     // #endif
     exit(1);
   }
+  CBF->max_count = UINT_MAX;
   CBF->ready = 1;
   return 0;
 }
@@ -116,7 +117,7 @@ static int minimalIncrementCBF_check_add(struct minimalIncrementCBF *CBF,
     }
   }
 
-  if (add == 1 && min_count < UINT_MAX) {
+  if (add == 1 && min_count < CBF->max_count) {
     for (i = 0; i < CBF->hashes; i++) {
       x = (a + i * b) % CBF->counter_num;
       if (CBF->bf[x] == min_count) {
@@ -125,7 +126,9 @@ static int minimalIncrementCBF_check_add(struct minimalIncrementCBF *CBF,
                CBF->bf[x], min_count);
 #endif
       }
-      CBF->bf[x]++;
+      if (CBF->bf[x] < CBF->max_count) {
+        CBF->bf[x]++;
+      }
     }
     min_count++;
   }

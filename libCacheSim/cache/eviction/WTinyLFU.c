@@ -8,6 +8,14 @@
 //
 //  part of the details borrowed from https://github.com/mandreyel/w-tinylfu
 //
+//  the frequency sketch follows Caffeine: counters stop at 15 (4 bits), and
+//  once the access count reaches 10x the cache size, the counters and the
+//  access count are halved. Differences from the TinyLFU paper:
+//    1. no doorkeeper
+//    2. the sketch is sized and aged in bytes, not objects
+//    3. an add increments all counters of an object, not only the smallest
+//    4. counters stop at 15 instead of W/C (= 10)
+//
 //  WTinyLFU.c
 //  libCacheSim
 //
@@ -169,8 +177,7 @@ cache_t *WTinyLFU_init(const common_cache_params_t ccache_params,
   params->req_local = new_request();
   params->n_admit_bytes = 0;
 
-  params->max_request_num =
-      32 * params->main_cache->cache_size;  // sample size is 32
+  params->max_request_num = 10 * cache->cache_size;  // sample size is 10x
 
   params->CBF =
       (struct minimalIncrementCBF *)malloc(sizeof(struct minimalIncrementCBF));
@@ -183,6 +190,7 @@ cache_t *WTinyLFU_init(const common_cache_params_t ccache_params,
   if (ret != 0) {
     ERROR("CBF init failed\n");
   }
+  params->CBF->max_count = 15;  // 4-bit counters
 
 #ifdef DEBUG_MODE
   minimalIncrementCBF_print(params->CBF);
@@ -234,7 +242,7 @@ static void WTinyLFU_record_access(WTinyLFU_params_t *params, obj_id_t obj_id) {
 
   params->request_counter++;
   if (params->request_counter >= params->max_request_num) {
-    params->request_counter = 0;
+    params->request_counter /= 2;
     minimalIncrementCBF_decay(params->CBF);
   }
 }
@@ -391,8 +399,6 @@ static const char *WTinyLFU_current_params(WTinyLFU_params_t *params) {
 static void WTinyLFU_parse_params(cache_t *cache,
                                   const char *cache_specific_params) {
   WTinyLFU_params_t *params = (WTinyLFU_params_t *)cache->eviction_params;
-
-  // params->max_request_num = 32 * cache->cache_size; // 32 * cache_size
 
   char *params_str = strdup(cache_specific_params);
   char *old_params_str = params_str;
