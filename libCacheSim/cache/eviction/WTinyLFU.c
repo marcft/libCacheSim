@@ -358,8 +358,6 @@ static void WTinyLFU_evict(cache_t *cache, const request_t *req) {
         }
       }
       // TODO @ Ziyue: add doorkeeper
-      minimalIncrementCBF_add(params->CBF, (void *)(&params->req_local->obj_id),
-                              sizeof(obj_id_t));
     } else {
       DEBUG_ASSERT(window->get_occupied_byte(window) == 0);
       main_cache->evict(main_cache, req);
