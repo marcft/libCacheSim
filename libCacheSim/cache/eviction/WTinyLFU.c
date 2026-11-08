@@ -4,6 +4,19 @@
 //  combined with a windowed LRU structure (W-TinyLFU)
 //  to resist burst traffic of temporal hot objects
 //
+//  hill-climb=1 adapts the window size with the hill climber of
+//  Adaptive Software Cache Management (Middleware'18, WC-W-TinyLFU):
+//  after every 10 x cache size of requests, compare the hit ratio with the
+//  previous period, keep moving the window in the same direction (5% steps
+//  between 1% and 80%) if it improved, turn around if not.
+//  Differences from the paper: the window does not go down to 0% (every
+//  object enters through the window, so 0% misses on every request), and a
+//  period is 10 x cache size bytes of requests, not 10 x cache size requests
+//  (the same when objects have unit size). Objects are not moved when the
+//  window changes: when the window grows, the main cache evicts its own
+//  victims down to its new size; when it shrinks, the main cache fills up
+//  with window victims
+//
 //  NOTE: it is NOT thread-safe
 //
 //  part of the details borrowed from https://github.com/mandreyel/w-tinylfu
@@ -41,9 +54,23 @@ typedef struct WTinyLFU_params {
   char main_cache_type[32];
 
   request_t *req_local;
+
+  bool hill_climb;
+  int window_step;      // see WTinyLFU_window_ratio
+  int climb_direction;  // 1 grows the window, -1 shrinks it
+  int64_t n_climb_req;  // requests, hits and bytes in this period
+  int64_t n_climb_hit;
+  int64_t n_climb_byte;
+  double prev_hit_ratio;
 } WTinyLFU_params_t;
 
 static const char *DEFAULT_PARAMS = "main-cache=SLRU,window-size=0.01";
+
+/* the window sizes the hill climber moves between: 1%, 5%, 10%, ..., 80% */
+#define N_WINDOW_STEP 16
+static double WTinyLFU_window_ratio(int step) {
+  return step == 0 ? 0.01 : 0.05 * step;
+}
 
 // ***********************************************************************
 // ****                                                               ****
@@ -110,6 +137,18 @@ cache_t *WTinyLFU_init(const common_cache_params_t ccache_params,
     WTinyLFU_parse_params(cache, cache_specific_params);
   }
 
+  if (params->hill_climb) {
+    if (strcasecmp(params->main_cache_type, "LRU") != 0 &&
+        strcasecmp(params->main_cache_type, "SLRU") != 0) {
+      ERROR("WTinyLFU hill-climb only supports LRU and SLRU main caches\n");
+    }
+    // start from the step closest to window-size
+    params->window_step = (int)(params->window_size / 0.05 + 0.5);
+    params->window_step = MIN(params->window_step, N_WINDOW_STEP);
+    params->window_size = WTinyLFU_window_ratio(params->window_step);
+    params->climb_direction = 1;
+  }
+
   common_cache_params_t ccache_params_local = ccache_params;
 
   ccache_params_local.cache_size *= params->window_size;
@@ -163,8 +202,9 @@ cache_t *WTinyLFU_init(const common_cache_params_t ccache_params,
     cache->obj_md_size = params->LRU->obj_md_size;
   }
 
-  snprintf(cache->cache_name, CACHE_NAME_ARRAY_LEN, "WTinyLFU-w%.2lf-%s",
-           params->window_size, params->main_cache_type);
+  snprintf(cache->cache_name, CACHE_NAME_ARRAY_LEN, "WTinyLFU-w%.2lf-%s%s",
+           params->window_size, params->main_cache_type,
+           params->hill_climb ? "-climb" : "");
 
   params->req_local = new_request();
   params->n_admit_bytes = 0;
@@ -216,12 +256,56 @@ static void WTinyLFU_free(cache_t *cache) {
   cache_struct_free(cache);
 }
 
+/* move the window to a new size, the main cache gets the rest */
+static void WTinyLFU_resize_window(cache_t *cache, const request_t *req,
+                                   double window_ratio) {
+  WTinyLFU_params_t *params = (WTinyLFU_params_t *)(cache->eviction_params);
+  params->LRU->cache_size = (int64_t)(cache->cache_size * window_ratio);
+  int64_t main_size = cache->cache_size - params->LRU->cache_size;
+  if (strcasecmp(params->main_cache_type, "SLRU") == 0) {
+    SLRU_resize(params->main_cache, main_size);
+  } else {
+    params->main_cache->cache_size = main_size;
+  }
+  // the window has grown, shrink the main cache to its new size now
+  cache_t *main_cache = params->main_cache;
+  while (main_cache->get_occupied_byte(main_cache) > main_cache->cache_size) {
+    main_cache->evict(main_cache, req);
+  }
+}
+
+static void WTinyLFU_climb(cache_t *cache, const request_t *req, bool hit) {
+  WTinyLFU_params_t *params = (WTinyLFU_params_t *)(cache->eviction_params);
+  params->n_climb_req += 1;
+  params->n_climb_hit += hit;
+  params->n_climb_byte += req->obj_size;
+  if (params->n_climb_byte < 10 * cache->cache_size) {
+    return;
+  }
+
+  double hit_ratio = (double)params->n_climb_hit / params->n_climb_req;
+  if (hit_ratio <= params->prev_hit_ratio) {
+    params->climb_direction = -params->climb_direction;
+  }
+  params->prev_hit_ratio = hit_ratio;
+  params->n_climb_req = params->n_climb_hit = params->n_climb_byte = 0;
+
+  params->window_step += params->climb_direction;
+  params->window_step = MAX(0, MIN(N_WINDOW_STEP, params->window_step));
+  WTinyLFU_resize_window(cache, req,
+                         WTinyLFU_window_ratio(params->window_step));
+}
+
 static bool WTinyLFU_get(cache_t *cache, const request_t *req) {
   /* because this field cannot be updated in time since segment LRUs are
    * updated, so we should not use this field */
   DEBUG_ASSERT(cache->occupied_byte == 0);
+  WTinyLFU_params_t *params = (WTinyLFU_params_t *)(cache->eviction_params);
 
   bool ck = cache_get_base(cache, req);
+  if (params->hill_climb) {
+    WTinyLFU_climb(cache, req, ck);
+  }
   return ck;
 }
 
@@ -383,10 +467,10 @@ static bool WTinyLFU_remove(cache_t *cache, obj_id_t obj_id) {
  * configured type, which is what `-e print` runs against */
 static const char *WTinyLFU_current_params(WTinyLFU_params_t *params) {
   static __thread char params_str[128];
-  snprintf(params_str, 128, "main-cache=%s,window-size=%.4lf",
+  snprintf(params_str, 128, "main-cache=%s,window-size=%.4lf,hill-climb=%d",
            params->main_cache == NULL ? params->main_cache_type
                                       : params->main_cache->cache_name,
-           params->window_size);
+           params->window_size, params->hill_climb);
   return params_str;
 }
 
@@ -418,6 +502,12 @@ static void WTinyLFU_parse_params(cache_t *cache,
       error = "expected a nonempty value";
     } else if (strcasecmp(key, "main-cache") == 0) {
       strncpy(params->main_cache_type, value, 30);
+    } else if (strcasecmp(key, "hill-climb") == 0) {
+      if (strcmp(value, "0") != 0 && strcmp(value, "1") != 0) {
+        error = "expected 0 or 1";
+      } else {
+        params->hill_climb = value[0] == '1';
+      }
     } else if (strcasecmp(key, "window-size") == 0) {
       char *end;
       errno = 0;

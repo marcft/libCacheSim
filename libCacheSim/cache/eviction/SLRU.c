@@ -26,6 +26,7 @@ typedef struct SLRU_params {
   int64_t *lru_n_objs;
   int64_t *lru_max_n_bytes;
   int n_seg;
+  double seg_ratio[SLRU_MAX_N_SEG];  // share of the cache, used by SLRU_resize
 } SLRU_params_t;
 
 // ***********************************************************************
@@ -141,6 +142,11 @@ cache_t *SLRU_init(const common_cache_params_t ccache_params,
           (int64_t)(ccache_params.cache_size / params->n_seg) +
           (i >= params->n_seg - remainder);
     }
+  }
+
+  for (int i = 0; i < params->n_seg; i++) {
+    params->seg_ratio[i] =
+        (double)params->lru_max_n_bytes[i] / ccache_params.cache_size;
   }
 
   params->lru_heads =
@@ -514,6 +520,22 @@ static void SLRU_parse_params(cache_t *cache,
 // ****                       internal functions                      ****
 // ****                                                               ****
 // ***********************************************************************
+/**
+ * @brief change the cache size, each segment keeps its share of the cache.
+ * No object is moved or evicted here: a segment over its new size shrinks on
+ * the next promotion, and the cache on the next eviction
+ */
+void SLRU_resize(cache_t *cache, int64_t new_size) {
+  SLRU_params_t *params = (SLRU_params_t *)(cache->eviction_params);
+  int64_t n_assigned = 0;
+  for (int i = 0; i < params->n_seg - 1; i++) {
+    params->lru_max_n_bytes[i] = (int64_t)(params->seg_ratio[i] * new_size);
+    n_assigned += params->lru_max_n_bytes[i];
+  }
+  params->lru_max_n_bytes[params->n_seg - 1] = new_size - n_assigned;
+  cache->cache_size = new_size;
+}
+
 /* SLRU cannot insert an object larger than segment size */
 bool SLRU_can_insert(cache_t *cache, const request_t *req) {
   SLRU_params_t *params = (SLRU_params_t *)cache->eviction_params;
