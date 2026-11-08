@@ -26,7 +26,7 @@ typedef struct SLRU_params {
   int64_t *lru_n_objs;
   int64_t *lru_max_n_bytes;
   int n_seg;
-  double seg_ratio[SLRU_MAX_N_SEG];  // share of the cache, used by SLRU_resize
+  double seg_ratio[SLRU_MAX_N_SEG];
 } SLRU_params_t;
 
 // ***********************************************************************
@@ -520,11 +520,7 @@ static void SLRU_parse_params(cache_t *cache,
 // ****                       internal functions                      ****
 // ****                                                               ****
 // ***********************************************************************
-/**
- * @brief change the cache size, each segment keeps its share of the cache.
- * No object is moved or evicted here: a segment over its new size shrinks on
- * the next promotion, and the cache on the next eviction
- */
+/* change the cache size and keep the share of each segment, no eviction */
 void SLRU_resize(cache_t *cache, int64_t new_size) {
   SLRU_params_t *params = (SLRU_params_t *)(cache->eviction_params);
   int64_t n_assigned = 0;

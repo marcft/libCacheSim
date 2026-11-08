@@ -338,7 +338,6 @@ done
 expect_output "WTinyLFU reports hill-climb=1" "hill-climb=1" \
 	"${BIN_DIR}/cachesim" "${TRACE}" vscsi wtinyLFU 1mb \
 	--hashpower=8 -e "hill-climb=1,print"
-# the hill climber resizes the main cache, which only LRU and SLRU support
 expect_clean_error "WTinyLFU hill-climb rejects a FIFO main cache" \
 	"${BIN_DIR}/cachesim" "${TRACE}" vscsi wtinyLFU 1mb \
 	--num-req=10 --hashpower=8 -e "main-cache=FIFO,hill-climb=1"

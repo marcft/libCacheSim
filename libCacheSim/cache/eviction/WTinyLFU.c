@@ -4,18 +4,12 @@
 //  combined with a windowed LRU structure (W-TinyLFU)
 //  to resist burst traffic of temporal hot objects
 //
-//  hill-climb=1 adapts the window size with the hill climber of
-//  Adaptive Software Cache Management (Middleware'18, WC-W-TinyLFU):
-//  after every 10 x cache size of requests, compare the hit ratio with the
-//  previous period, keep moving the window in the same direction (5% steps
-//  between 1% and 80%) if it improved, turn around if not.
-//  Differences from the paper: the window does not go down to 0% (every
-//  object enters through the window, so 0% misses on every request), and a
-//  period is 10 x cache size bytes of requests, not 10 x cache size requests
-//  (the same when objects have unit size). Objects are not moved when the
-//  window changes: when the window grows, the main cache evicts its own
-//  victims down to its new size; when it shrinks, the main cache fills up
-//  with window victims
+//  hill-climb=1 adapts the window size with the hill climber in Adaptive
+//  Software Cache Management (Middleware'18): every 10 x cache size bytes of
+//  requests, move the window by 5% (between 1% and 80%), in the same
+//  direction if the hit ratio improved, otherwise in the other direction.
+//  Different from the paper, the window does not go down to 0% (every request
+//  would miss), and the period is in bytes (the same for unit-size objects)
 //
 //  NOTE: it is NOT thread-safe
 //
@@ -56,9 +50,9 @@ typedef struct WTinyLFU_params {
   request_t *req_local;
 
   bool hill_climb;
-  int window_step;      // see WTinyLFU_window_ratio
-  int climb_direction;  // 1 grows the window, -1 shrinks it
-  int64_t n_climb_req;  // requests, hits and bytes in this period
+  int window_step;
+  int climb_direction;
+  int64_t n_climb_req;
   int64_t n_climb_hit;
   int64_t n_climb_byte;
   double prev_hit_ratio;
@@ -66,8 +60,7 @@ typedef struct WTinyLFU_params {
 
 static const char *DEFAULT_PARAMS = "main-cache=SLRU,window-size=0.01";
 
-/* the window sizes the hill climber moves between: 1%, 5%, 10%, ..., 80% */
-#define N_WINDOW_STEP 16
+#define MAX_WINDOW_STEP 16
 static double WTinyLFU_window_ratio(int step) {
   return step == 0 ? 0.01 : 0.05 * step;
 }
@@ -142,9 +135,8 @@ cache_t *WTinyLFU_init(const common_cache_params_t ccache_params,
         strcasecmp(params->main_cache_type, "SLRU") != 0) {
       ERROR("WTinyLFU hill-climb only supports LRU and SLRU main caches\n");
     }
-    // start from the step closest to window-size
-    params->window_step = (int)(params->window_size / 0.05 + 0.5);
-    params->window_step = MIN(params->window_step, N_WINDOW_STEP);
+    params->window_step =
+        (int)MIN(lround(params->window_size / 0.05), MAX_WINDOW_STEP);
     params->window_size = WTinyLFU_window_ratio(params->window_step);
     params->climb_direction = 1;
   }
@@ -256,19 +248,18 @@ static void WTinyLFU_free(cache_t *cache) {
   cache_struct_free(cache);
 }
 
-/* move the window to a new size, the main cache gets the rest */
-static void WTinyLFU_resize_window(cache_t *cache, const request_t *req,
-                                   double window_ratio) {
+static void WTinyLFU_resize_window(cache_t *cache, const request_t *req) {
   WTinyLFU_params_t *params = (WTinyLFU_params_t *)(cache->eviction_params);
+  cache_t *main_cache = params->main_cache;
+  double window_ratio = WTinyLFU_window_ratio(params->window_step);
   params->LRU->cache_size = (int64_t)(cache->cache_size * window_ratio);
   int64_t main_size = cache->cache_size - params->LRU->cache_size;
   if (strcasecmp(params->main_cache_type, "SLRU") == 0) {
-    SLRU_resize(params->main_cache, main_size);
+    SLRU_resize(main_cache, main_size);
   } else {
-    params->main_cache->cache_size = main_size;
+    main_cache->cache_size = main_size;
   }
-  // the window has grown, shrink the main cache to its new size now
-  cache_t *main_cache = params->main_cache;
+  // if the window has grown, the main cache evicts down to its new size
   while (main_cache->get_occupied_byte(main_cache) > main_cache->cache_size) {
     main_cache->evict(main_cache, req);
   }
@@ -291,9 +282,8 @@ static void WTinyLFU_climb(cache_t *cache, const request_t *req, bool hit) {
   params->n_climb_req = params->n_climb_hit = params->n_climb_byte = 0;
 
   params->window_step += params->climb_direction;
-  params->window_step = MAX(0, MIN(N_WINDOW_STEP, params->window_step));
-  WTinyLFU_resize_window(cache, req,
-                         WTinyLFU_window_ratio(params->window_step));
+  params->window_step = MAX(0, MIN(MAX_WINDOW_STEP, params->window_step));
+  WTinyLFU_resize_window(cache, req);
 }
 
 static bool WTinyLFU_get(cache_t *cache, const request_t *req) {

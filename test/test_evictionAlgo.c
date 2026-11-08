@@ -623,32 +623,31 @@ static void test_WTinyLFU_counts_window_hits(void) {
   cache->cache_free(cache);
 }
 
-// The hill climber decides after every 10 x cache size of requests. The first
-// decision always grows the window, from 1% to 5% here, and the main cache
-// evicts its own victims down to its new size right away.
+// The first hill climbing decision, after 10 x cache size requests, grows the
+// window from 1% to 5%, and the main cache evicts down to its new size.
 static void test_WTinyLFU_hill_climb_grows_window(void) {
   common_cache_params_t cc_params = {.cache_size = 100, .hashpower = 8};
   cache_t *cache = WTinyLFU_init(cc_params, "main-cache=LRU,hill-climb=1");
   request_t *req = new_request();
   req->obj_size = 1;
 
-  // 1 to 100 fill the cache, and 101 moves 1 to 99 into the main cache
+  // 101 moves 1 to 99 into the main cache
   for (obj_id_t id = 1; id <= 101; id++) {
     req->obj_id = id;
     g_assert_false(cache->get(cache, req));
   }
   g_assert_cmpint(cache->get_n_obj(cache), ==, 100);
 
-  // hits fill up the first period of 1000 requests
+  // hits on the main cache until the 1000th request
   for (int i = 0; i < 899; i++) {
     req->obj_id = 2 + i % 98;
     g_assert_true(cache->get(cache, req));
   }
 
-  // the window is now 5 objects, the main cache 95 instead of 99
+  // the main cache is now 95 objects instead of 99
   g_assert_cmpint(cache->get_n_obj(cache), ==, 96);
 
-  // the next four objects fit without an eviction
+  // the window grows into the free space
   for (obj_id_t id = 102; id <= 105; id++) {
     req->obj_id = id;
     g_assert_false(cache->get(cache, req));
@@ -659,10 +658,8 @@ static void test_WTinyLFU_hill_climb_grows_window(void) {
   cache->cache_free(cache);
 }
 
-// SLRU_resize keeps each segment's share of the cache: with seg-size=1:4 the
-// lowest segment, which caps the object size, is 20% of the cache. Resizing
-// to 333 rounds it down to 66; going back must give 200 again, not 198 as
-// scaling the rounded size would.
+// SLRU_resize keeps the 1:4 shares. The first segment, which caps the object
+// size, is 66 at size 333 and 200 again (not 198) back at size 1000.
 static void test_SLRU_resize(void) {
   common_cache_params_t cc_params = {.cache_size = 1000, .hashpower = 8};
   cache_t *cache = SLRU_init(cc_params, "seg-size=1:4");
