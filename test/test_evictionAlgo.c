@@ -658,6 +658,28 @@ static void test_WTinyLFU_hill_climb_grows_window(void) {
   cache->cache_free(cache);
 }
 
+// A period without hits must not trap the climber: with 19 objects the 1% and
+// 5% windows hold no object, so it has to keep growing the window to 10%.
+static void test_WTinyLFU_hill_climb_no_hits(void) {
+  common_cache_params_t cc_params = {.cache_size = 19, .hashpower = 8};
+  cache_t *cache = WTinyLFU_init(cc_params, "main-cache=LRU,hill-climb=1");
+  request_t *req = new_request();
+  req->obj_size = 1;
+
+  int64_t n_hit = 0;
+  for (int i = 0; i < 1000; i++) {
+    req->obj_id = 1 + i % 5;
+    bool hit = cache->get(cache, req);
+    // the first two periods of 190 requests run with an empty window
+    if (i < 380) g_assert_false(hit);
+    n_hit += hit;
+  }
+  g_assert_cmpint(n_hit, >, 0);
+
+  free_request(req);
+  cache->cache_free(cache);
+}
+
 // SLRU_resize keeps the configured share of each segment. With seg-size=1:4
 // the first segment, which caps the object size, is 14 at size 71, 6 at size
 // 30, and 14 again back at size 71.
@@ -788,6 +810,8 @@ int main(int argc, char *argv[]) {
                   test_WTinyLFU_counts_window_hits);
   g_test_add_func("/libCacheSim/cacheAlgo_WTinyLFU_hill_climb_grows_window",
                   test_WTinyLFU_hill_climb_grows_window);
+  g_test_add_func("/libCacheSim/cacheAlgo_WTinyLFU_hill_climb_no_hits",
+                  test_WTinyLFU_hill_climb_no_hits);
   g_test_add_func("/libCacheSim/cacheAlgo_SLRU_resize", test_SLRU_resize);
 
 #if defined(ENABLE_3L_CACHE) && ENABLE_3L_CACHE == 1

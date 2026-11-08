@@ -7,9 +7,11 @@
 //  hill-climb=1 adapts the window size with the hill climber in Adaptive
 //  Software Cache Management (Middleware'18): every 10 x cache size bytes of
 //  requests, move the window by 5% (between 1% and 80%), in the same
-//  direction if the hit ratio improved, otherwise in the other direction.
+//  direction unless the hit ratio dropped, otherwise in the other direction.
 //  Different from the paper, the window does not go down to 0% (every request
-//  would miss), and the period is in bytes (the same for unit-size objects)
+//  would miss), a tie keeps the direction (as in Caffeine, otherwise a cache
+//  without hits switches between 1% and 5% forever), and the period is in
+//  bytes (the same for unit-size objects)
 //
 //  NOTE: it is NOT thread-safe
 //
@@ -275,7 +277,7 @@ static void WTinyLFU_climb(cache_t *cache, const request_t *req, bool hit) {
   }
 
   double hit_ratio = (double)params->n_climb_hit / params->n_climb_req;
-  if (hit_ratio <= params->prev_hit_ratio) {
+  if (hit_ratio < params->prev_hit_ratio) {
     params->climb_direction = -params->climb_direction;
   }
   params->prev_hit_ratio = hit_ratio;
