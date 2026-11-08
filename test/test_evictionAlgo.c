@@ -706,6 +706,25 @@ static void test_SLRU_resize(void) {
   cache->cache_free(cache);
 }
 
+// After SLRU_resize a resident object can be larger than the next segment.
+// A hit must keep it in place: promoting it would cool it back down and
+// evict it while SLRU_find still uses it.
+static void test_SLRU_resize_keeps_large_object(void) {
+  common_cache_params_t cc_params = {.cache_size = 100, .hashpower = 8};
+  cache_t *cache = SLRU_init(cc_params, "seg-size=1:4");
+  request_t *req = new_request();
+  req->obj_id = 1;
+  req->obj_size = 20;
+
+  g_assert_false(cache->get(cache, req));
+  SLRU_resize(cache, 20);  // segments of 4 and 16 bytes
+  g_assert_true(cache->get(cache, req));
+  g_assert_nonnull(cache->find(cache, req, false));
+
+  free_request(req);
+  cache->cache_free(cache);
+}
+
 /* The MINISIM profiler only knows an algorithm by its name and reaches it
  * through create_cache_using_plugin(). That used to go straight to dlsym(),
  * which cannot see a built-in constructor in a statically linked build — the
@@ -813,6 +832,8 @@ int main(int argc, char *argv[]) {
   g_test_add_func("/libCacheSim/cacheAlgo_WTinyLFU_hill_climb_no_hits",
                   test_WTinyLFU_hill_climb_no_hits);
   g_test_add_func("/libCacheSim/cacheAlgo_SLRU_resize", test_SLRU_resize);
+  g_test_add_func("/libCacheSim/cacheAlgo_SLRU_resize_keeps_large_object",
+                  test_SLRU_resize_keeps_large_object);
 
 #if defined(ENABLE_3L_CACHE) && ENABLE_3L_CACHE == 1
   g_test_add_data_func("/libCacheSim/cacheAlgo_3LCache", reader, test_3LCache);
