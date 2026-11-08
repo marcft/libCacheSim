@@ -582,9 +582,10 @@ static void test_3LCache(gconstpointer user_data) {
 #endif /* ENABLE_3L_CACHE */
 
 // W-TinyLFU counts every access, so a hit in the window must raise an object's
-// frequency just as a hit in the main cache does. Object 102 is read six times
-// while it sits in the window; when it reaches the window's tail it must beat
-// the main cache's victim, counted twice, and be admitted.
+// frequency just as a hit in the main cache does, while leaving the window is
+// not an access. Object 102 is read twice while it sits in the window; when it
+// reaches the window's tail it must beat the main cache's victim, read once,
+// and be admitted.
 static void test_WTinyLFU_counts_window_hits(void) {
   // 1000-byte objects: 100 fit, half in the window and half in the main cache.
   // The sketch is sized from the main cache's bytes, so with this few objects
@@ -603,9 +604,7 @@ static void test_WTinyLFU_counts_window_hits(void) {
     g_assert_false(cache->get(cache, req));
   }
   req->obj_id = 102;
-  for (int i = 0; i < 5; i++) {
-    g_assert_true(cache->get(cache, req));
-  }
+  g_assert_true(cache->get(cache, req));
 
   // 49 new objects bring 102 to the window's tail, and the 50th evicts it.
   for (obj_id_t id = 103; id <= 152; id++) {

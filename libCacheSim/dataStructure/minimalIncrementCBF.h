@@ -27,6 +27,7 @@ struct minimalIncrementCBF {
   // on these.
   double bpe;
   unsigned int* bf;
+  unsigned int max_count;
   int ready;
 };
 
