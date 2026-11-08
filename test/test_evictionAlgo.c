@@ -658,25 +658,26 @@ static void test_WTinyLFU_hill_climb_grows_window(void) {
   cache->cache_free(cache);
 }
 
-// SLRU_resize keeps the 1:4 shares. The first segment, which caps the object
-// size, is 66 at size 333 and 200 again (not 198) back at size 1000.
+// SLRU_resize keeps the configured share of each segment. With seg-size=1:4
+// the first segment, which caps the object size, is 14 at size 71, 6 at size
+// 30, and 14 again back at size 71.
 static void test_SLRU_resize(void) {
-  common_cache_params_t cc_params = {.cache_size = 1000, .hashpower = 8};
+  common_cache_params_t cc_params = {.cache_size = 71, .hashpower = 8};
   cache_t *cache = SLRU_init(cc_params, "seg-size=1:4");
   request_t *req = new_request();
   req->obj_id = 1;
 
-  SLRU_resize(cache, 333);
-  g_assert_cmpint(cache->cache_size, ==, 333);
-  req->obj_size = 66;
+  SLRU_resize(cache, 30);
+  g_assert_cmpint(cache->cache_size, ==, 30);
+  req->obj_size = 6;
   g_assert_true(cache->can_insert(cache, req));
-  req->obj_size = 67;
+  req->obj_size = 7;
   g_assert_false(cache->can_insert(cache, req));
 
-  SLRU_resize(cache, 1000);
-  req->obj_size = 200;
+  SLRU_resize(cache, 71);
+  req->obj_size = 14;
   g_assert_true(cache->can_insert(cache, req));
-  req->obj_size = 201;
+  req->obj_size = 15;
   g_assert_false(cache->can_insert(cache, req));
 
   free_request(req);

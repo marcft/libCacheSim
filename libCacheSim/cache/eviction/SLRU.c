@@ -141,12 +141,8 @@ cache_t *SLRU_init(const common_cache_params_t ccache_params,
       params->lru_max_n_bytes[i] =
           (int64_t)(ccache_params.cache_size / params->n_seg) +
           (i >= params->n_seg - remainder);
+      params->seg_ratio[i] = 1.0 / params->n_seg;
     }
-  }
-
-  for (int i = 0; i < params->n_seg; i++) {
-    params->seg_ratio[i] =
-        (double)params->lru_max_n_bytes[i] / ccache_params.cache_size;
   }
 
   params->lru_heads =
@@ -495,9 +491,9 @@ static void SLRU_parse_params(cache_t *cache,
       params->n_seg = n_seg;
       params->lru_max_n_bytes = calloc(params->n_seg, sizeof(int64_t));
       for (int i = 0; i < n_seg; i++) {
+        params->seg_ratio[i] = (double)seg_size_array[i] / seg_size_sum;
         params->lru_max_n_bytes[i] =
-            (int64_t)((double)seg_size_array[i] / seg_size_sum *
-                      cache->cache_size);
+            (int64_t)(params->seg_ratio[i] * cache->cache_size);
         if (params->lru_max_n_bytes[i] <= 0) {
           ERROR("Invalid segment size for segment %d: %lld bytes\n", i,
                 (long long)params->lru_max_n_bytes[i]);
