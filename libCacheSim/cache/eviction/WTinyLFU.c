@@ -6,12 +6,10 @@
 //
 //  hill-climb=1 adapts the window size with the hill climber in Adaptive
 //  Software Cache Management (Middleware'18): every 10 x cache size bytes of
-//  requests, move the window by 5% (between 1% and 80%), in the same
-//  direction unless the hit ratio dropped, otherwise in the other direction.
-//  Different from the paper, the window does not go down to 0% (every request
-//  would miss), a tie keeps the direction (as in Caffeine, otherwise a cache
-//  without hits switches between 1% and 5% forever), and the period is in
-//  bytes (the same for unit-size objects)
+//  requests, move the window by 5% (1% to 80%), and turn around if the hit
+//  ratio dropped. Different from the paper, the window does not go to 0%
+//  (every request would miss), a tie does not turn around (as in Caffeine),
+//  and the period is in bytes (the same for unit-size objects)
 //
 //  NOTE: it is NOT thread-safe
 //
@@ -261,7 +259,6 @@ static void WTinyLFU_resize_window(cache_t *cache, const request_t *req) {
   } else {
     main_cache->cache_size = main_size;
   }
-  // if the window has grown, the main cache evicts down to its new size
   while (main_cache->get_occupied_byte(main_cache) > main_cache->cache_size) {
     main_cache->evict(main_cache, req);
   }

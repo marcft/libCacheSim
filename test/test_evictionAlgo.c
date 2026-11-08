@@ -680,9 +680,8 @@ static void test_WTinyLFU_hill_climb_no_hits(void) {
   cache->cache_free(cache);
 }
 
-// SLRU_resize keeps the configured share of each segment. With seg-size=1:4
-// the first segment, which caps the object size, is 14 at size 71, 6 at size
-// 30, and 14 again back at size 71.
+// SLRU_resize keeps the 1:4 shares: the first segment, which caps the object
+// size, is 14 at size 71, 6 at size 30, and 14 again back at size 71.
 static void test_SLRU_resize(void) {
   common_cache_params_t cc_params = {.cache_size = 71, .hashpower = 8};
   cache_t *cache = SLRU_init(cc_params, "seg-size=1:4");
@@ -706,9 +705,8 @@ static void test_SLRU_resize(void) {
   cache->cache_free(cache);
 }
 
-// After SLRU_resize a resident object can be larger than the next segment.
-// A hit must keep it in place: promoting it would cool it back down and
-// evict it while SLRU_find still uses it.
+// After SLRU_resize an object can be larger than the next segment. A hit must
+// keep it, not promote it, cool it back down and evict it.
 static void test_SLRU_resize_keeps_large_object(void) {
   common_cache_params_t cc_params = {.cache_size = 100, .hashpower = 8};
   cache_t *cache = SLRU_init(cc_params, "seg-size=1:4");
