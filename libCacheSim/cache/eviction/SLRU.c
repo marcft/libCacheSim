@@ -412,6 +412,8 @@ static bool SLRU_remove(cache_t *cache, obj_id_t obj_id) {
     return false;
   }
 
+  params->lru_n_bytes[obj->SLRU.lru_id] -= obj->obj_size + cache->obj_md_size;
+  params->lru_n_objs[obj->SLRU.lru_id]--;
   remove_obj_from_list(&(params->lru_heads[obj->SLRU.lru_id]),
                        &(params->lru_tails[obj->SLRU.lru_id]), obj);
   cache_remove_obj_base(cache, obj, true);

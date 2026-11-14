@@ -423,6 +423,7 @@ static void WTinyLFU_evict(cache_t *cache, const request_t *req) {
                  window_victim->next_access_vtime);
 #endif
 
+          // ends: WTinyLFU_can_insert checks the object fits in main
           do {
             main_cache->evict(main_cache, req);
           } while (!WTinyLFU_main_fits(main_cache, params->req_local));
@@ -462,6 +463,7 @@ static bool WTinyLFU_remove(cache_t *cache, obj_id_t obj_id) {
     return true;
   }
   if (params->main_cache->remove(params->main_cache, obj_id)) {
+    params->main_full = false;
     return true;
   }
   return false;

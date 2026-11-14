@@ -744,6 +744,27 @@ static void test_SLRU_seg_size_fills_cache(void) {
   cache->cache_free(cache);
 }
 
+// removing an object frees its segment for the next insert
+static void test_SLRU_remove_frees_segment(void) {
+  common_cache_params_t cc_params = {.cache_size = 5, .hashpower = 8};
+  cache_t *cache = SLRU_init(cc_params, "seg-size=1:4");
+  request_t *req = new_request();
+  req->obj_size = 1;
+
+  for (obj_id_t id = 1; id <= 5; id++) {
+    req->obj_id = id;
+    g_assert_false(cache->get(cache, req));
+  }
+  g_assert_true(cache->remove(cache, 1));
+
+  req->obj_id = 6;
+  g_assert_false(cache->get(cache, req));
+  g_assert_cmpint(cache->get_n_obj(cache), ==, 5);
+
+  free_request(req);
+  cache->cache_free(cache);
+}
+
 // a cold window victim must not take a free slot in a full main cache
 static void test_WTinyLFU_full_main_checks_admission(void) {
   common_cache_params_t cc_params = {.cache_size = 13, .hashpower = 8};
@@ -908,6 +929,8 @@ int main(int argc, char *argv[]) {
   g_test_add_func("/libCacheSim/cacheAlgo_SLRU_resize", test_SLRU_resize);
   g_test_add_func("/libCacheSim/cacheAlgo_SLRU_seg_size_fills_cache",
                   test_SLRU_seg_size_fills_cache);
+  g_test_add_func("/libCacheSim/cacheAlgo_SLRU_remove_frees_segment",
+                  test_SLRU_remove_frees_segment);
   g_test_add_func("/libCacheSim/cacheAlgo_WTinyLFU_full_main_checks_admission",
                   test_WTinyLFU_full_main_checks_admission);
   g_test_add_func(
