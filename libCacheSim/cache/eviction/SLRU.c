@@ -381,6 +381,9 @@ static void SLRU_evict(cache_t *cache, const request_t *req) {
   SLRU_params_t *params = (SLRU_params_t *)(cache->eviction_params);
 
   cache_obj_t *obj = SLRU_to_evict(cache, req);
+  if (obj == NULL) {
+    ERROR("SLRU: no object to evict\n");
+  }
 
   params->lru_n_bytes[obj->SLRU.lru_id] -= obj->obj_size + cache->obj_md_size;
   params->lru_n_objs[obj->SLRU.lru_id]--;
