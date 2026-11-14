@@ -394,8 +394,14 @@ static void WTinyLFU_evict(cache_t *cache, const request_t *req) {
        * caller asking the composite what it reserves is not told less than it
        * really does; using it here would bill a FIFO or Clock main cache for
        * the window's 16 bytes and call it full early. */
-      if (!params->main_full &&
-          WTinyLFU_main_fits(main_cache, params->req_local)) {
+      if (params->req_local->obj_size + main_cache->obj_md_size >
+          main_cache->cache_size) {
+        // the hill climber can shrink the main cache below this object
+        window->evict(window, req);
+        evicted = true;
+      } else if ((!params->main_full ||
+                  main_cache->get_n_obj(main_cache) == 0) &&
+                 WTinyLFU_main_fits(main_cache, params->req_local)) {
         main_cache->insert(main_cache, params->req_local);
 
 #if defined(TRACK_DEMOTION)
@@ -462,6 +468,7 @@ static bool WTinyLFU_remove(cache_t *cache, obj_id_t obj_id) {
     return true;
   }
   if (params->main_cache->remove(params->main_cache, obj_id)) {
+    params->main_full = false;
     return true;
   }
   return false;

@@ -341,6 +341,9 @@ expect_output "WTinyLFU reports hill-climb=1" "hill-climb=1" \
 expect_clean_error "WTinyLFU hill-climb rejects a FIFO main cache" \
 	"${BIN_DIR}/cachesim" "${TRACE}" vscsi wtinyLFU 1mb \
 	--num-req=10 --hashpower=8 -e "main-cache=FIFO,hill-climb=1"
+expect_ok "WTinyLFU hill-climb runs with a small LRU main cache" \
+	"${BIN_DIR}/cachesim" "${TRACE}" vscsi wtinyLFU 256kb \
+	--hashpower=8 -e "main-cache=LRU,hill-climb=1"
 
 echo "running admission and prefetch missing-value tests"
 
